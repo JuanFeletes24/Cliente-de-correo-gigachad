@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Aplicación Proyecto #1
 
 
@@ -86,3 +87,7 @@ flet build web -v
 
 Para más detalles sobre cómo crear la aplicación web, consulta la [Guía de empaquetado para Web](https://flet.dev/docs/publish/web/).
 
+=======
+# Cliente-de-correo-gigachad
+Proyecto de Redes de Computadores,
+>>>>>>> 00eaf088bc99ca9ad5cb70be90f5460569f807dc
