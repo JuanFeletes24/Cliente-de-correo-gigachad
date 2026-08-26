@@ -4,6 +4,7 @@ import imaplib
 import poplib
 import email
 import smtplib
+import re
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from email.mime.text import MIMEText
@@ -155,36 +156,112 @@ class ImapEmail:
             fallback=14,
         )
 
-        print(self.IMAP_PORT, self.IMAP_SERVER)
-
-    def get_emails(self, n_emails=5):
+    def _connect(self):
         if not self.USER or not self.PASS:
-            return
+            return None
+
+        mail = imaplib.IMAP4_SSL(
+            self.IMAP_SERVER,
+            self.IMAP_PORT,
+        )
+        mail.login(
+            self.USER,
+            self.PASS,
+        )
+        return mail
+
+    def get_mailboxes(self):
+        mail = None
+        mailboxes = []
 
         try:
-            mail = imaplib.IMAP4_SSL(
-                self.IMAP_SERVER,
-                self.IMAP_PORT,
-            )
+            mail = self._connect()
+            if mail is None:
+                return []
 
-            mail.login(
-                self.USER,
-                self.PASS,
-            )
+            status, lines = mail.list()
+            if status != "OK":
+                return []
 
-            mail.select("INBOX")
+            special_uses = {
+                "\\Sent",
+                "\\Drafts",
+                "\\Junk",
+                "\\Trash",
+                "\\Archive",
+                "\\All",
+            }
+
+            for line in lines or []:
+                decoded = line.decode("utf-8", errors="replace")
+                match = re.match(
+                    r'^\((?P<attributes>[^)]*)\)\s+(?:"[^"]*"|NIL)\s+(?P<name>.+)$',
+                    decoded,
+                )
+                if not match:
+                    continue
+
+                name = match.group("name").strip()
+                if name.startswith('"') and name.endswith('"'):
+                    name = name[1:-1].replace(r'\"', '"')
+
+                attributes = set(match.group("attributes").split())
+                special_use = next(
+                    (item for item in special_uses if item in attributes),
+                    None,
+                )
+                mailboxes.append({
+                    "name": name,
+                    "special_use": special_use,
+                })
+
+            return mailboxes
+
+        except Exception as e:
+            print(f"Error listando mailboxes IMAP: {e}")
+            return []
+
+        finally:
+            if mail is not None:
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
+
+    def get_emails(self, n_emails=5, mailbox="INBOX"):
+        mail = None
+
+        try:
+            mail = self._connect()
+            if mail is None:
+                return
+
+            status, _ = mail.select(mailbox)
+            if status != "OK":
+                return
+
+            response, values = mail.response("UIDVALIDITY")
+            uidvalidity = ""
+            if response and values:
+                value = values[0]
+                if isinstance(value, bytes):
+                    value = value.decode("ascii", errors="ignore")
+                uidvalidity = str(value)
 
             # Buscar correos de las últimas N jornadas.
             date_since = (
                 datetime.now() - timedelta(days=self.DAYS)
             ).strftime("%d-%b-%Y")
 
-            status, data = mail.search(
+            status, data = mail.uid(
+                "SEARCH",
                 None,
                 f'(SINCE "{date_since}")',
             )
 
-            mail_ids = data[0].split()
+            mail_ids = data[0].split() if status == "OK" and data else []
+            if n_emails is not None:
+                mail_ids = mail_ids[-n_emails:]
 
             print(
                 status,
@@ -193,31 +270,100 @@ class ImapEmail:
             )
 
             for mail_id in mail_ids:
-                status, msg_data = mail.fetch(
+                status, msg_data = mail.uid(
+                    "FETCH",
                     mail_id,
-                    "(RFC822)",
+                    "(FLAGS BODY.PEEK[])",
                 )
 
                 if status == "OK":
-                    raw_email = msg_data[0][1]
+                    payload = next(
+                        (
+                            item for item in msg_data
+                            if isinstance(item, tuple)
+                            and len(item) > 1
+                        ),
+                        None,
+                    )
+                    if payload is None:
+                        continue
+
+                    metadata, raw_email = payload
+                    is_read = b"\\Seen" in metadata
 
                     message = email.message_from_bytes(
                         raw_email
                     )
 
-                    uid = mail_id.decode()
+                    uid = mail_id.decode("ascii")
 
                     self._save_to_db(
                         uid,
                         message,
+                        mailbox,
+                        uidvalidity,
+                        is_read,
                     )
-
-            mail.logout()
 
         except Exception as e:
             print(f"Error IMAP: {e}")
 
-    def _save_to_db(self, uid, message):
+        finally:
+            if mail is not None:
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
+
+    def mark_as_read(self, mailbox, uid, uidvalidity=""):
+        mail = None
+
+        try:
+            mail = self._connect()
+            if mail is None:
+                return False
+
+            status, _ = mail.select(mailbox)
+            if status != "OK":
+                return False
+
+            status, _ = mail.uid(
+                "STORE",
+                str(uid),
+                "+FLAGS.SILENT",
+                "(\\Seen)",
+            )
+            if status != "OK":
+                return False
+
+            db.mark_email_as_read(
+                "imap",
+                self.USER,
+                mailbox,
+                uidvalidity,
+                uid,
+            )
+            return True
+
+        except Exception as e:
+            print(f"Error marcando correo IMAP como leído: {e}")
+            return False
+
+        finally:
+            if mail is not None:
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
+
+    def _save_to_db(
+        self,
+        uid,
+        message,
+        mailbox="INBOX",
+        uidvalidity="",
+        is_read=False,
+    ):
         subject = decode_mime_words(
             message.get("Subject", "")
         )
@@ -246,13 +392,16 @@ class ImapEmail:
             )
 
         db.save_email(
-            uid,
-            self.USER,
-            sender,
-            subject,
-            date,
-            body,
-            is_new=1,
+            uid=uid,
+            account=self.USER,
+            sender=sender,
+            subject=subject,
+            date=date,
+            body=body,
+            protocol="imap",
+            mailbox=mailbox,
+            uidvalidity=uidvalidity,
+            is_read=is_read,
         )
 
 
@@ -288,10 +437,10 @@ class PopEmail:
             fallback=14,
         )
 
-        print(
-            self.POP_PORT,
-            self.POP_SERVER,
-        )
+        self.mail = None
+
+        if not self.USER or not self.PASS:
+            return
 
         try:
             self.mail = poplib.POP3_SSL(
@@ -312,6 +461,11 @@ class PopEmail:
                 f"Error iniciando POP: {e}"
             )
 
+            if self.mail is not None:
+                try:
+                    self.mail.quit()
+                except Exception:
+                    pass
             self.mail = None
 
     def get_mails(self, n_emails=5):
@@ -332,10 +486,22 @@ class PopEmail:
                 tzinfo=None
             )
 
+            uid_by_number = {}
+            try:
+                _, uid_lines, _ = self.mail.uidl()
+                for line in uid_lines:
+                    number, uid = line.split(maxsplit=1)
+                    uid_by_number[int(number)] = uid.decode(
+                        "ascii",
+                        errors="replace",
+                    )
+            except Exception as e:
+                print(f"UIDL no disponible, usando Message-ID: {e}")
+
             # Evitar descargar miles por defecto.
             fetch_count = min(
                 num_messages,
-                50,
+                n_emails,
             )
 
             for i in range(
@@ -373,10 +539,12 @@ class PopEmail:
                     except Exception:
                         pass
 
-                uid = message.get(
-                    "Message-ID",
-                    str(i + 1),
-                )
+                uid = uid_by_number.get(i + 1)
+                if uid is None:
+                    uid = message.get(
+                        "Message-ID",
+                        str(i + 1),
+                    )
 
                 self._save_to_db(
                     uid,
@@ -387,6 +555,13 @@ class PopEmail:
             print(
                 f"Error leyendo POP3: {e}"
             )
+
+        finally:
+            try:
+                self.mail.quit()
+            except Exception as e:
+                print(f"Error cerrando POP3: {e}")
+            self.mail = None
 
     def _save_to_db(self, uid, message):
         subject = decode_mime_words(
@@ -416,13 +591,16 @@ class PopEmail:
             )
 
         db.save_email(
-            uid,
-            self.USER,
-            sender,
-            subject,
-            date,
-            body,
-            is_new=1,
+            uid=uid,
+            account=self.USER,
+            sender=sender,
+            subject=subject,
+            date=date,
+            body=body,
+            protocol="pop",
+            mailbox="INBOX",
+            uidvalidity="",
+            is_read=False,
         )
 
 
