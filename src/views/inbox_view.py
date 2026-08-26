@@ -36,8 +36,8 @@ def format_email_body(raw_body):
         )
 
         for tag in soup([
-            "style",
             "script",
+            "style",
             "head",
             "meta",
             "link",
@@ -45,17 +45,31 @@ def format_email_body(raw_body):
         ]):
             tag.decompose()
 
-        clean_html = str(soup)
+        # Eliminar algunos elementos explícitamente ocultos
+        for tag in soup.select(
+            '[style*="display:none"], '
+            '[style*="display: none"], '
+            '[hidden]'
+        ):
+            tag.decompose()
 
-        return markdownify.markdownify(
-            clean_html,
-            heading_style="ATX",
+        text = soup.get_text(
+            separator="\n",
+            strip=True,
         )
+
+        # Eliminar líneas vacías repetidas
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip()
+        ]
+
+        return "\n\n".join(lines)
 
     except Exception:
         return raw_body
-
-
+    
 def show_inbox(page: ft.Page):
     page.title = "Redes de Computadores: Proyecto 1"
 
@@ -248,52 +262,52 @@ def show_inbox(page: ft.Page):
 
         return handle_click
 
-    def email_card(
-        email_data: dict,
-    ) -> ft.Control:
+    def email_card(email_data: dict) -> ft.Control:
+        subject_row = [
+            ft.Text(
+                email_data.get("subject") or "(Sin Asunto)",
+                weight=ft.FontWeight.BOLD,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+                expand=True,  # empuja el badge a la derecha
+            ),
+        ]
 
-        card = ft.Container(
+        if email_data.get("is_new"):
+            subject_row.append(
+                ft.Container(
+                    content=ft.Text("Nuevo", size=10, color=ft.Colors.WHITE),
+                    bgcolor=ft.Colors.RED,
+                    padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                    border_radius=4,
+                )
+            )
+
+        return ft.Container(
             padding=12,
             border_radius=8,
             bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
             ink=True,
             on_click=show_body(email_data),
-            content=ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            content=ft.Column(
+                spacing=2,
                 controls=[
-                    ft.Column(
-                        spacing=2,
-                        expand=True,
-                        controls=[
-                            ft.Text(
-                                email_data.get("subject")
-                                or "(Sin Asunto)",
-                                weight=ft.FontWeight.BOLD,
-                                max_lines=1,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                            ),
-                            ft.Text(
-                                email_data.get("from")
-                                or "(Desconocido)",
-                                color=ft.Colors.OUTLINE,
-                                size=12,
-                                max_lines=1,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                            ),
-                            ft.Text(
-                                email_data.get("date")
-                                or "",
-                                color=ft.Colors.OUTLINE,
-                                size=10,
-                                max_lines=1,
-                            ),
-                        ],
+                    ft.Row(
+                        subject_row,
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     ),
-                    ft.Button(
-                        "Leer",
-                        on_click=show_body(
-                            email_data
-                        ),
+                    ft.Text(
+                        email_data.get("from") or "(Desconocido)",
+                        color=ft.Colors.OUTLINE,
+                        size=12,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    ft.Text(
+                        email_data.get("date") or "",
+                        color=ft.Colors.OUTLINE,
+                        size=10,
+                        max_lines=1,
                     ),
                 ],
             ),
@@ -327,6 +341,7 @@ def show_inbox(page: ft.Page):
     left_column = ft.Column(
         expand=35,
         scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,  # nuevo
         controls=[],
     )
 
