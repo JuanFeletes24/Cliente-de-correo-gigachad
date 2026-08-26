@@ -753,7 +753,7 @@ def show_inbox(page: ft.Page):
 
     def open_compose(e):
         comp_to = ft.TextField(
-            label="Para (Destinatario)"
+            label="Destinatario"
         )
 
         comp_subject = ft.TextField(
@@ -820,6 +820,7 @@ def show_inbox(page: ft.Page):
 
         right_column.content = ft.Column(
             scroll=ft.ScrollMode.AUTO,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,  # nuevo
             controls=[
                 ft.Text(
                     "Nuevo correo",
@@ -842,6 +843,7 @@ def show_inbox(page: ft.Page):
                 ),
             ],
         )
+
         page.update()
 
     # ----------------------------------
