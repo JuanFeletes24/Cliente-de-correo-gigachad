@@ -32,6 +32,11 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: tests requiring the local GreenMail server",
+    "e2e: Flet end-to-end tests",
+    "live: tests requiring real external mail credentials",
+]
 
 [tool.flet]
 desktop_flavor = "light"
