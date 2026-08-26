@@ -1,3 +1,17 @@
+Metadata-Version: 2.4
+Name: cliente-correo-gigachad
+Version: 0.1.0
+Summary: Cliente de correo electrónico con soporte IMAP, POP3, SMTP, almacenamiento offline y cifrado simétrico.
+Author: Sebastián Pérez, Juan Daniel Moreno, Juan Felipe Rojas
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: flet>=0.86.5
+Requires-Dist: cryptography>=46.0.0
+Requires-Dist: beautifulsoup4>=4.13.0
+Requires-Dist: markdownify>=1.2.0
+Dynamic: license-file
+
 # Redes de Computadores - Proyecto #1: Cliente de Correo Electrónico
 
 Aplicación de escritorio desarrollada en Python con **Flet**, que implementa un cliente de correo electrónico completo con soporte para protocolos **IMAP**, **POP3** y **SMTP**, almacenamiento local en base de datos **SQLite** para lectura offline y **cifrado simétrico de mensajes por contacto**.
@@ -66,38 +80,20 @@ email_gui/
    * Si el destinatario tiene una clave configurada en la sección de claves, el mensaje se enviará cifrado al servidor.
 
 ---
+
 ## 💻 Entorno y Ejecución
 
-El proyecto utiliza `pyproject.toml` para definir sus dependencias y configuración. Se recomienda utilizar **uv** para crear y gestionar automáticamente el entorno virtual.
-
-### Preparar el entorno
-
-Desde la raíz del proyecto:
+### Crear ambiente virtual
 
 ```bash
-uv sync
+python -m venv mi_virtualenv
 ```
 
-Este comando:
-
-* crea automáticamente el entorno virtual `.venv`;
-* instala las dependencias definidas en `pyproject.toml`;
-* mantiene sincronizado el entorno del proyecto.
-
-### Ejecutar la aplicación
+### Instalar librerías
 
 ```bash
-uv run python src/main.py
+pip install "flet[all]" cryptography beautifulsoup4 markdownify
 ```
-
-También puede ejecutarse directamente mediante Flet:
-
-```bash
-uv run flet run
-```
-
-> [!NOTE]
-> No es necesario instalar manualmente `flet`, `cryptography`, `beautifulsoup4` o `markdownify`, ya que estas dependencias están declaradas en `pyproject.toml` y son instaladas automáticamente por `uv sync`.
 
 ### Ejecutar la aplicación
 
