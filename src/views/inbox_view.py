@@ -1,5 +1,6 @@
 import flet as ft
 import markdownify
+import asyncio
 
 from modules.email import (
     ImapEmail,
@@ -24,6 +25,37 @@ Selecciona un correo de la lista a la izquierda para ver su contenido aquí.
 """
 
 
+def format_email_body(raw_body):
+    if "<" not in raw_body or ">" not in raw_body:
+        return raw_body
+
+    try:
+        soup = BeautifulSoup(
+            raw_body,
+            "html.parser",
+        )
+
+        for tag in soup([
+            "style",
+            "script",
+            "head",
+            "meta",
+            "link",
+            "noscript",
+        ]):
+            tag.decompose()
+
+        clean_html = str(soup)
+
+        return markdownify.markdownify(
+            clean_html,
+            heading_style="ATX",
+        )
+
+    except Exception:
+        return raw_body
+
+
 def show_inbox(page: ft.Page):
     page.title = "Redes de Computadores: Proyecto 1"
 
@@ -33,6 +65,8 @@ def show_inbox(page: ft.Page):
         "html": "",
         "subject": "",
     }
+    body_request = {"id": 0}
+    sync_lock = asyncio.Lock()
 
     # Header y contenido del panel derecho
     selected_subject = ft.Text(
@@ -130,6 +164,26 @@ def show_inbox(page: ft.Page):
         selectable=True,
     )
 
+    normal_right_content = ft.Column(
+        scroll=ft.ScrollMode.AUTO,
+        controls=[
+            selected_subject,
+            selected_from,
+            ft.Row(
+                [
+                    selected_date,
+                    btn_open_browser,
+                ],
+                alignment=(
+                    ft.MainAxisAlignment
+                    .SPACE_BETWEEN
+                ),
+            ),
+            ft.Divider(),
+            markdown_cont,
+        ],
+    )
+
     def notify(msg: str):
         page.show_dialog(
             ft.SnackBar(
@@ -138,7 +192,10 @@ def show_inbox(page: ft.Page):
         )
 
     def show_body(email_data: dict):
-        def handle_click(e):
+        async def handle_click(e):
+            body_request["id"] += 1
+            request_id = body_request["id"]
+
             current_selected_email["html"] = (
                 email_data.get("body", "") or ""
             )
@@ -164,43 +221,23 @@ def show_inbox(page: ft.Page):
             )
 
             btn_open_browser.visible = True
+            right_column.content = normal_right_content
 
             raw_body = (
                 email_data.get("body", "")
                 or ""
             )
 
-            # Limpiar HTML con BeautifulSoup
-            # antes de convertir a Markdown
-            if "<" in raw_body and ">" in raw_body:
-                try:
-                    soup = BeautifulSoup(
-                        raw_body,
-                        "html.parser",
-                    )
+            markdown_cont.value = "*Procesando correo...*"
+            page.update()
 
-                    for tag in soup([
-                        "style",
-                        "script",
-                        "head",
-                        "meta",
-                        "link",
-                        "noscript",
-                    ]):
-                        tag.decompose()
+            md_text = await asyncio.to_thread(
+                format_email_body,
+                raw_body,
+            )
 
-                    clean_html = str(soup)
-
-                    md_text = markdownify.markdownify(
-                        clean_html,
-                        heading_style="ATX",
-                    )
-
-                except Exception:
-                    md_text = raw_body
-
-            else:
-                md_text = raw_body
+            if request_id != body_request["id"]:
+                return
 
             markdown_cont.value = (
                 md_text.strip()
@@ -326,42 +363,58 @@ def show_inbox(page: ft.Page):
 
         page.update()
 
-    def refresh_emails(e):
+    def sync_emails_once():
         protocol = config.get(
             "app",
             "protocol",
             fallback="imap",
         ).lower()
 
-        notify(
-            f"Descargando correos vía "
-            f"{protocol.upper()}..."
-        )
+        if protocol == "imap":
+            ImapEmail().get_emails()
+        else:
+            PopEmail().get_mails()
 
-        page.update()
+    async def perform_sync(manual=False):
+        if sync_lock.locked():
+            if manual:
+                notify("Ya hay una sincronización en curso.")
+            return
 
-        try:
-            if protocol == "imap":
-                imap = ImapEmail()
-                imap.get_emails()
+        async with sync_lock:
+            if manual:
+                protocol = config.get(
+                    "app",
+                    "protocol",
+                    fallback="imap",
+                ).upper()
+                notify(f"Descargando correos vía {protocol}...")
 
-            else:
-                pop = PopEmail()
-                pop.get_mails()
+            try:
+                await asyncio.to_thread(sync_emails_once)
+                load_emails_from_db()
 
-            load_emails_from_db()
+                if manual:
+                    notify(
+                        "Bandeja de entrada "
+                        "sincronizada con éxito."
+                    )
 
-            notify(
-                "Bandeja de entrada "
-                "sincronizada con éxito."
-            )
+            except Exception as ex:
+                if manual:
+                    notify(f"Error al sincronizar: {ex}")
+                else:
+                    print(f"Error de sincronización automática: {ex}")
 
-        except Exception as ex:
-            notify(
-                f"Error al sincronizar: {ex}"
-            )
+            page.update()
 
-        page.update()
+    async def refresh_emails(e):
+        await perform_sync(manual=True)
+
+    async def auto_sync_worker():
+        while True:
+            await perform_sync()
+            await asyncio.sleep(60)
 
     # ----------------------------------
     # CONFIGURACIÓN
@@ -699,7 +752,13 @@ def show_inbox(page: ft.Page):
             max_lines=8,
         )
 
-        def send_action(ev):
+        send_button = ft.FilledButton("Enviar")
+
+        def close_compose(ev=None):
+            right_column.content = normal_right_content
+            page.update()
+
+        async def send_action(ev):
             if (
                 not comp_to.value
                 or not comp_subject.value
@@ -710,59 +769,65 @@ def show_inbox(page: ft.Page):
                 )
                 return
 
-            sender = SmtpSender()
-
             notify(
                 "Enviando correo..."
             )
-
+            send_button.disabled = True
             page.update()
 
-            success, msg = sender.send_email(
-                comp_to.value.strip(),
-                comp_subject.value.strip(),
-                comp_body.value,
-            )
+            try:
+                sender = SmtpSender()
+                success, msg = await asyncio.to_thread(
+                    sender.send_email,
+                    comp_to.value.strip(),
+                    comp_subject.value.strip(),
+                    comp_body.value,
+                )
+            except Exception as ex:
+                success, msg = False, str(ex)
 
             if success:
                 notify(
                     "¡Correo enviado con éxito!"
                 )
 
-                page.pop_dialog()
+                close_compose()
 
             else:
+                send_button.disabled = False
                 notify(
                     f"Error al enviar: {msg}"
                 )
 
-        dlg = ft.AlertDialog(
-            title=ft.Text(
-                "Redactar Correo Electrónico"
-            ),
-            content=ft.Column(
-                [
-                    comp_to,
-                    comp_subject,
-                    comp_body,
-                ],
-                tight=True,
-                width=500,
-            ),
-            actions=[
-                ft.TextButton(
-                    "Cancelar",
-                    on_click=lambda ev:
-                    page.pop_dialog(),
+            page.update()
+
+        send_button.on_click = send_action
+
+        right_column.content = ft.Column(
+            scroll=ft.ScrollMode.AUTO,
+            controls=[
+                ft.Text(
+                    "Nuevo correo",
+                    size=20,
+                    weight=ft.FontWeight.BOLD,
                 ),
-                ft.FilledButton(
-                    "Enviar",
-                    on_click=send_action,
+                ft.Divider(),
+                comp_to,
+                comp_subject,
+                comp_body,
+                ft.Row(
+                    controls=[
+                        ft.TextButton(
+                            "Cancelar",
+                            on_click=close_compose,
+                        ),
+                        send_button,
+                    ],
+                    alignment=ft.MainAxisAlignment.END,
                 ),
             ],
         )
-
-        page.show_dialog(dlg)
+        page.update()
 
     # ----------------------------------
     # APP BAR
@@ -825,25 +890,7 @@ def show_inbox(page: ft.Page):
                 ft.Colors.SURFACE_CONTAINER_HIGHEST,
             ),
         ),
-        content=ft.Column(
-            scroll=ft.ScrollMode.AUTO,
-            controls=[
-                selected_subject,
-                selected_from,
-                ft.Row(
-                    [
-                        selected_date,
-                        btn_open_browser,
-                    ],
-                    alignment=(
-                        ft.MainAxisAlignment
-                        .SPACE_BETWEEN
-                    ),
-                ),
-                ft.Divider(),
-                markdown_cont,
-            ],
-        ),
+        content=normal_right_content,
     )
 
     page.add(
@@ -859,3 +906,4 @@ def show_inbox(page: ft.Page):
     # Cargar correos iniciales
     # desde base de datos local
     load_emails_from_db()
+    page.run_task(auto_sync_worker)
