@@ -157,6 +157,10 @@ Para más detalles sobre cómo crear el paquete para Linux, consulta la [Guía d
 ```bash
 flet build windows -v
 ```
+
+> [!TIP]
+> Una vez finalizada la compilación, encontrarás el archivo ejecutable (`.exe`) dentro de la carpeta `build/windows`. Recuerda que para compartir la aplicación, debes copiar la carpeta `windows` completa, no solo el ejecutable.
+
 Para más detalles sobre cómo crear el paquete para Windows, consulta la [Guía de empaquetado para Windows](https://flet.dev/docs/publish/windows/).
 
 ### Web

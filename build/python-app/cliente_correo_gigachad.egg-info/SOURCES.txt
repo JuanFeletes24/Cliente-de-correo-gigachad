@@ -1,0 +1,13 @@
+LICENSE
+README.md
+pyproject.toml
+src/main.py
+src/cliente_correo_gigachad.egg-info/PKG-INFO
+src/cliente_correo_gigachad.egg-info/SOURCES.txt
+src/cliente_correo_gigachad.egg-info/dependency_links.txt
+src/cliente_correo_gigachad.egg-info/requires.txt
+src/cliente_correo_gigachad.egg-info/top_level.txt
+src/modules/crypto.py
+src/modules/db.py
+src/modules/email.py
+tests/test_main.py

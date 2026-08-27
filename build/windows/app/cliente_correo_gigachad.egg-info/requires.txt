@@ -1,0 +1,4 @@
+flet>=0.86.5
+cryptography>=46.0.0
+beautifulsoup4>=4.13.0
+markdownify>=1.2.0
