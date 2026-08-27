@@ -478,7 +478,7 @@ class PopEmail:
                     pass
             self.mail = None
 
-    def get_mails(self, n_emails=5):
+    def get_mails(self, n_emails=None):
         if not self.mail:
             return
 
@@ -508,10 +508,11 @@ class PopEmail:
             except Exception as e:
                 print(f"UIDL no disponible, usando Message-ID: {e}")
 
-            # Evitar descargar miles por defecto.
-            fetch_count = min(
-                num_messages,
-                n_emails,
+            # Aplicar un límite únicamente si se solicita explícitamente.
+            fetch_count = (
+                num_messages
+                if n_emails is None
+                else min(num_messages, n_emails)
             )
 
             for i in range(
