@@ -534,7 +534,7 @@ def show_inbox(page: ft.Page):
     async def auto_sync_worker():
         while True:
             await perform_sync()
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
 
     async def load_mailboxes():
         if not mailbox_dropdown.visible:
