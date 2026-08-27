@@ -34,6 +34,7 @@ class FakeIMAP:
             b'(\\HasNoChildren \\Sent) "/" "Sent Items"',
             b'(\\HasNoChildren \\Important) "/" "Important"',
             b'(\\Flagged \\HasNoChildren) "/" "Starred"',
+            b'(\\HasNoChildren) "/" "Projects"',
         ]
 
     def select(self, mailbox):
@@ -88,10 +89,11 @@ def test_list_mailboxes_and_connection(monkeypatch, mail_config, isolated_db):
     assert (instance.server, instance.port) == ("imap.example.test", 1993)
     assert ("login", "user@example.test", "secret") in instance.calls
     assert mailboxes == [
-        {"name": "INBOX", "special_use": None},
-        {"name": "Sent Items", "special_use": "\\Sent"},
-        {"name": "Important", "special_use": "\\Important"},
-        {"name": "Starred", "special_use": "\\Flagged"},
+        {"name": "INBOX", "special_use": None, "identity": "INBOX"},
+        {"name": "Sent Items", "special_use": "\\Sent", "identity": "\\Sent"},
+        {"name": "Important", "special_use": "\\Important", "identity": "\\Important"},
+        {"name": "Starred", "special_use": "\\Flagged", "identity": "\\Flagged"},
+        {"name": "Projects", "special_use": None, "identity": "Projects"},
     ]
     assert instance.logged_out
 
@@ -100,7 +102,11 @@ def test_uid_sync_flags_uidvalidity_and_peek(
     monkeypatch, mail_config, isolated_db
 ):
     client = configure(monkeypatch, mail_config, isolated_db)
-    client.get_emails(mailbox="Sent Items", n_emails=2)
+    client.get_emails(
+        mailbox="Sent Items",
+        mailbox_identity="\\Sent",
+        n_emails=2,
+    )
     instance = FakeIMAP.instances[-1]
 
     assert ("select", '"Sent Items"') in instance.calls
@@ -110,7 +116,7 @@ def test_uid_sync_flags_uidvalidity_and_peek(
     assert all("BODY.PEEK[]" in call[3] for call in fetches)
 
     messages = isolated_db.get_all_emails(
-        "user@example.test", protocol="imap", mailbox="Sent Items"
+        "user@example.test", protocol="imap", mailbox="\\Sent"
     )
     assert {message["uid"] for message in messages} == {"41", "42"}
     assert {message["uidvalidity"] for message in messages} == {"777"}
@@ -139,16 +145,26 @@ def test_sync_does_not_mark_message_as_seen(
 def test_mark_as_read_uses_uid_store(monkeypatch, mail_config, isolated_db):
     client = configure(monkeypatch, mail_config, isolated_db)
     isolated_db.save_email(
-        protocol="imap", account=client.USER, mailbox="INBOX", uid="41",
+        protocol="imap", account=client.USER, mailbox="\\Sent", uid="41",
         uidvalidity="777", sender="sender", subject="subject", date="",
         body="body", is_read=False,
     )
 
-    client.mark_as_read("INBOX", "41", "777")
+    client.mark_as_read(
+        "Sent Items",
+        "41",
+        "777",
+        mailbox_identity="\\Sent",
+    )
     calls = FakeIMAP.instances[-1].calls
-    assert ("select", '"INBOX"') in calls
+    assert ("select", '"Sent Items"') in calls
     assert ("uid", "STORE", "41", "+FLAGS.SILENT", "(\\Seen)") in calls
-    assert isolated_db.get_all_emails(client.USER)[0]["is_read"] is True
+    message = isolated_db.get_all_emails(
+        client.USER,
+        protocol="imap",
+        mailbox="\\Sent",
+    )[0]
+    assert message["is_read"] is True
 
 
 def test_logout_on_fetch_error(monkeypatch, mail_config, isolated_db):

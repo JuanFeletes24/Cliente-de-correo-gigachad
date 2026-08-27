@@ -89,3 +89,25 @@ def test_contacts_survive_legacy_migration(monkeypatch, tmp_path):
     assert message["protocol"] == "imap"
     assert message["mailbox"] == "INBOX"
     assert message["is_read"] is False
+
+
+def test_migrate_current_mailbox_name_to_special_use(isolated_db):
+    db = isolated_db
+    save(db, mailbox="Sent Items")
+
+    db.migrate_mailbox_identity(
+        "user@example.test",
+        "Sent Items",
+        "\\Sent",
+    )
+
+    assert db.get_all_emails(
+        "user@example.test",
+        protocol="imap",
+        mailbox="Sent Items",
+    ) == []
+    assert len(db.get_all_emails(
+        "user@example.test",
+        protocol="imap",
+        mailbox="\\Sent",
+    )) == 1
