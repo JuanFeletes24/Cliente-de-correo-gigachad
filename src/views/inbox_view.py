@@ -363,12 +363,20 @@ def show_inbox(page: ft.Page):
         "\\Trash": "Papelera",
         "\\Archive": "Archivo",
         "\\All": "Todos",
+        "\\Important": "Importantes",
+        "\\Flagged": "Destacados",
     }
 
     async def mailbox_changed(e):
         selected_mailbox["name"] = mailbox_dropdown.value or "INBOX"
         load_emails_from_db()
-        await perform_sync(wait_if_busy=True)
+        notify(
+            f"Buscando correos en {selected_mailbox['name']}..."
+        )
+        await perform_sync(
+            manual=True,
+            wait_if_busy=True,
+        )
 
     mailbox_dropdown = ft.Dropdown(
         key="mailbox-selector",
@@ -435,13 +443,16 @@ def show_inbox(page: ft.Page):
 
     def sync_emails_once(protocol, mailbox):
         if protocol == "imap":
-            ImapEmail().get_emails(mailbox=mailbox)
+            ImapEmail().get_emails(
+                n_emails=None,
+                mailbox=mailbox,
+            )
         else:
             PopEmail().get_mails()
 
     async def perform_sync(manual=False, wait_if_busy=False):
         if sync_lock.locked():
-            if manual:
+            if manual and not wait_if_busy:
                 notify("Ya hay una sincronización en curso.")
                 return
             if not wait_if_busy:
@@ -461,11 +472,19 @@ def show_inbox(page: ft.Page):
                 )
 
             try:
-                await asyncio.to_thread(
-                    sync_emails_once,
-                    protocol,
-                    mailbox,
+                sync_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        sync_emails_once,
+                        protocol,
+                        mailbox,
+                    )
                 )
+
+                while not sync_task.done():
+                    await asyncio.sleep(1)
+                    load_emails_from_db()
+
+                await sync_task
                 load_emails_from_db()
 
                 if manual:

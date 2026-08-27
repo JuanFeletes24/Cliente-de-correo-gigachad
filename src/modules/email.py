@@ -170,6 +170,11 @@ class ImapEmail:
         )
         return mail
 
+    @staticmethod
+    def _quote_mailbox(mailbox):
+        escaped = str(mailbox).replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+
     def get_mailboxes(self):
         mail = None
         mailboxes = []
@@ -190,6 +195,8 @@ class ImapEmail:
                 "\\Trash",
                 "\\Archive",
                 "\\All",
+                "\\Important",
+                "\\Flagged",
             }
 
             for line in lines or []:
@@ -206,6 +213,9 @@ class ImapEmail:
                     name = name[1:-1].replace(r'\"', '"')
 
                 attributes = set(match.group("attributes").split())
+                if "\\Noselect" in attributes:
+                    continue
+
                 special_use = next(
                     (item for item in special_uses if item in attributes),
                     None,
@@ -236,7 +246,7 @@ class ImapEmail:
             if mail is None:
                 return
 
-            status, _ = mail.select(mailbox)
+            status, _ = mail.select(self._quote_mailbox(mailbox))
             if status != "OK":
                 return
 
@@ -323,7 +333,7 @@ class ImapEmail:
             if mail is None:
                 return False
 
-            status, _ = mail.select(mailbox)
+            status, _ = mail.select(self._quote_mailbox(mailbox))
             if status != "OK":
                 return False
 
