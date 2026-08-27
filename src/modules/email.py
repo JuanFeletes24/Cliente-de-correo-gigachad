@@ -220,9 +220,15 @@ class ImapEmail:
                     (item for item in special_uses if item in attributes),
                     None,
                 )
+                identity = (
+                    "INBOX"
+                    if name.upper() == "INBOX"
+                    else special_use or name
+                )
                 mailboxes.append({
                     "name": name,
                     "special_use": special_use,
+                    "identity": identity,
                 })
 
             return mailboxes
@@ -238,8 +244,14 @@ class ImapEmail:
                 except Exception:
                     pass
 
-    def get_emails(self, n_emails=5, mailbox="INBOX"):
+    def get_emails(
+        self,
+        n_emails=5,
+        mailbox="INBOX",
+        mailbox_identity=None,
+    ):
         mail = None
+        mailbox_identity = mailbox_identity or mailbox
 
         try:
             mail = self._connect()
@@ -310,7 +322,7 @@ class ImapEmail:
                     self._save_to_db(
                         uid,
                         message,
-                        mailbox,
+                        mailbox_identity,
                         uidvalidity,
                         is_read,
                     )
@@ -325,8 +337,15 @@ class ImapEmail:
                 except Exception:
                     pass
 
-    def mark_as_read(self, mailbox, uid, uidvalidity=""):
+    def mark_as_read(
+        self,
+        mailbox,
+        uid,
+        uidvalidity="",
+        mailbox_identity=None,
+    ):
         mail = None
+        mailbox_identity = mailbox_identity or mailbox
 
         try:
             mail = self._connect()
@@ -349,7 +368,7 @@ class ImapEmail:
             db.mark_email_as_read(
                 "imap",
                 self.USER,
-                mailbox,
+                mailbox_identity,
                 uidvalidity,
                 uid,
             )

@@ -81,7 +81,17 @@ def show_inbox(page: ft.Page):
     }
     body_request = {"id": 0}
     sync_lock = asyncio.Lock()
-    selected_mailbox = {"name": "INBOX"}
+    selected_mailbox = {
+        "server_name": "INBOX",
+        "identity": "INBOX",
+    }
+    mailbox_definitions = {
+        "INBOX": {
+            "name": "INBOX",
+            "special_use": None,
+            "identity": "INBOX",
+        }
+    }
 
     # Header y contenido del panel derecho
     selected_subject = ft.Text(
@@ -252,9 +262,10 @@ def show_inbox(page: ft.Page):
                     mark_read_task = asyncio.create_task(
                         asyncio.to_thread(
                             ImapEmail().mark_as_read,
-                            email_data["mailbox"],
+                            selected_mailbox["server_name"],
                             email_data["uid"],
                             email_data["uidvalidity"],
+                            email_data["mailbox"],
                         )
                     )
                 else:
@@ -368,10 +379,19 @@ def show_inbox(page: ft.Page):
     }
 
     async def mailbox_changed(e):
-        selected_mailbox["name"] = mailbox_dropdown.value or "INBOX"
+        server_name = mailbox_dropdown.value or "INBOX"
+        mailbox_data = mailbox_definitions.get(
+            server_name,
+            {
+                "name": server_name,
+                "identity": server_name,
+            },
+        )
+        selected_mailbox["server_name"] = server_name
+        selected_mailbox["identity"] = mailbox_data["identity"]
         load_emails_from_db()
         notify(
-            f"Buscando correos en {selected_mailbox['name']}..."
+            f"Buscando correos en {selected_mailbox['server_name']}..."
         )
         await perform_sync(
             manual=True,
@@ -408,7 +428,7 @@ def show_inbox(page: ft.Page):
             fallback="imap",
         ).lower()
         mailbox = (
-            selected_mailbox["name"]
+            selected_mailbox["identity"]
             if protocol == "imap"
             else "INBOX"
         )
@@ -441,11 +461,16 @@ def show_inbox(page: ft.Page):
 
         page.update()
 
-    def sync_emails_once(protocol, mailbox):
+    def sync_emails_once(
+        protocol,
+        server_name,
+        mailbox_identity,
+    ):
         if protocol == "imap":
             ImapEmail().get_emails(
                 n_emails=None,
-                mailbox=mailbox,
+                mailbox=server_name,
+                mailbox_identity=mailbox_identity,
             )
         else:
             PopEmail().get_mails()
@@ -464,7 +489,8 @@ def show_inbox(page: ft.Page):
                 "protocol",
                 fallback="imap",
             ).lower()
-            mailbox = selected_mailbox["name"]
+            server_name = selected_mailbox["server_name"]
+            mailbox_identity = selected_mailbox["identity"]
 
             if manual:
                 notify(
@@ -476,7 +502,8 @@ def show_inbox(page: ft.Page):
                     asyncio.to_thread(
                         sync_emails_once,
                         protocol,
-                        mailbox,
+                        server_name,
+                        mailbox_identity,
                     )
                 )
 
@@ -519,6 +546,22 @@ def show_inbox(page: ft.Page):
         if not mailboxes:
             return
 
+        mailbox_definitions.clear()
+        mailbox_definitions.update({
+            item["name"]: item
+            for item in mailboxes
+        })
+
+        account = config.get("auth", "user", fallback="")
+        for item in mailboxes:
+            if item["special_use"]:
+                await asyncio.to_thread(
+                    db.migrate_mailbox_identity,
+                    account,
+                    item["name"],
+                    item["identity"],
+                )
+
         mailbox_dropdown.options = [
             ft.dropdown.Option(
                 key=item["name"],
@@ -534,18 +577,38 @@ def show_inbox(page: ft.Page):
             for item in mailboxes
         ]
         available = {item["name"] for item in mailboxes}
-        if selected_mailbox["name"] not in available:
-            selected_mailbox["name"] = (
+        if selected_mailbox["server_name"] not in available:
+            selected_mailbox["server_name"] = (
                 "INBOX" if "INBOX" in available else mailboxes[0]["name"]
             )
-        mailbox_dropdown.value = selected_mailbox["name"]
+        selected_mailbox["identity"] = mailbox_definitions[
+            selected_mailbox["server_name"]
+        ]["identity"]
+        mailbox_dropdown.value = selected_mailbox["server_name"]
+        load_emails_from_db()
         page.update()
+
+    async def reload_current_account():
+        if mailbox_dropdown.visible:
+            await load_mailboxes()
+        await perform_sync(wait_if_busy=True)
 
     # ----------------------------------
     # CONFIGURACIÓN
     # ----------------------------------
 
     def open_settings(e):
+        old_user = config.get(
+            "auth",
+            "user",
+            fallback="",
+        )
+        old_protocol = config.get(
+            "app",
+            "protocol",
+            fallback="imap",
+        ).lower()
+
         conf_user = ft.TextField(
             label="Usuario (Correo)",
             value=config.get(
@@ -692,12 +755,54 @@ def show_inbox(page: ft.Page):
             protocol = config.get(
                 "app", "protocol", fallback="imap"
             ).lower()
-            selected_mailbox["name"] = "INBOX"
-            mailbox_dropdown.value = "INBOX"
+            new_user = config.get(
+                "auth",
+                "user",
+                fallback="",
+            )
+            account_changed = old_user != new_user
+            protocol_changed = old_protocol != protocol
+
             mailbox_dropdown.visible = protocol == "imap"
             mailbox_container.visible = mailbox_dropdown.visible
+
+            if account_changed:
+                body_request["id"] += 1
+                current_selected_email["html"] = ""
+                current_selected_email["subject"] = ""
+                selected_subject.value = "Bienvenido a tu Cliente de Correo"
+                selected_from.value = ""
+                selected_date.value = ""
+                markdown_cont.value = SAMPLE_TEXT
+                btn_open_browser.visible = False
+                right_column.content = normal_right_content
+
+                selected_mailbox["server_name"] = "INBOX"
+                selected_mailbox["identity"] = "INBOX"
+                mailbox_definitions.clear()
+                mailbox_definitions["INBOX"] = {
+                    "name": "INBOX",
+                    "special_use": None,
+                    "identity": "INBOX",
+                }
+                mailbox_dropdown.value = "INBOX"
+                mailbox_dropdown.options = [
+                    ft.dropdown.Option(
+                        key="INBOX",
+                        text="Recibidos",
+                    )
+                ]
+
+            elif protocol_changed:
+                selected_mailbox["server_name"] = "INBOX"
+                selected_mailbox["identity"] = "INBOX"
+                mailbox_dropdown.value = "INBOX"
+
             load_emails_from_db()
-            if mailbox_dropdown.visible:
+
+            if account_changed:
+                page.run_task(reload_current_account)
+            elif mailbox_dropdown.visible:
                 page.run_task(load_mailboxes)
 
         dlg = ft.AlertDialog(

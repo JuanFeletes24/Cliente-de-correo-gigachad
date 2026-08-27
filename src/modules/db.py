@@ -194,6 +194,27 @@ def mark_email_as_read(protocol, account, mailbox, uidvalidity, uid):
     conn.close()
 
 
+def migrate_mailbox_identity(account, server_name, mailbox_identity):
+    if server_name == mailbox_identity:
+        return
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE OR IGNORE emails
+        SET mailbox = ?
+        WHERE protocol = 'imap'
+          AND account = ?
+          AND mailbox = ?
+    ''', (
+        mailbox_identity,
+        account,
+        server_name,
+    ))
+    conn.commit()
+    conn.close()
+
+
 def get_contact_key(email_address):
     conn = get_connection()
     cursor = conn.cursor()
